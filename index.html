@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive Quiz Game</title>
+    <title>Interactive Quiz Game - Real-time</title>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    
     <style>
         * {
             margin: 0;
@@ -39,6 +44,22 @@
             font-size: 2.5rem;
             margin-bottom: 10px;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .connection-status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-left: 10px;
+        }
+
+        .connected {
+            background: #4CAF50;
+        }
+
+        .disconnected {
+            background: #f44336;
         }
 
         .tab-container {
@@ -363,13 +384,23 @@
             margin-bottom: 8px;
             color: #fdbb2d;
         }
+
+        .sync-notice {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Interactive Quiz Game</h1>
+            <h1>Interactive Quiz Game - Real-time</h1>
             <p>Test your knowledge and compete with teams or individually!</p>
+            <div class="connection-status" id="connectionStatus">Connecting...</div>
         </header>
 
         <div class="tab-container">
@@ -380,7 +411,7 @@
 
         <!-- Player Panel -->
         <div class="panel active" id="playerPanel">
-            <h2>Player Panel</h2>
+            <h2>Player Panel <span class="sync-notice">Live Updates Enabled</span></h2>
             
             <div class="instructions">
                 <h4>How to Play:</h4>
@@ -388,6 +419,7 @@
                 <p>• For individual questions, enter your name</p>
                 <p>• Earn points for correct answers</p>
                 <p>• Compete for the highest score!</p>
+                <p>• <strong>Real-time:</strong> All players see the same questions and scores</p>
             </div>
             
             <div class="team-selector">
@@ -397,7 +429,7 @@
                 </select>
             </div>
             
-            <div id="questionDisplay">No questions available. Please add questions in the admin panel.</div>
+            <div id="questionDisplay">Connecting to game server...</div>
             
             <div id="pointsDisplay">Points: 0</div>
             
@@ -408,7 +440,7 @@
             </div>
             
             <div class="game-controls">
-                <button id="nextQuestion">Next Question</button>
+                <button id="nextQuestion" disabled>Next Question</button>
                 <button id="resetGame">Reset Game</button>
             </div>
             
@@ -426,7 +458,7 @@
 
         <!-- Admin Panel -->
         <div class="panel" id="adminPanel">
-            <h2>Admin Panel</h2>
+            <h2>Admin Panel <span class="sync-notice">Changes sync to all players</span></h2>
             
             <div class="instructions">
                 <h4>Admin Instructions:</h4>
@@ -434,6 +466,7 @@
                 <p>• Set points and question type (Team/Individual)</p>
                 <p>• Create teams for players to join</p>
                 <p>• Monitor scores and progress</p>
+                <p>• <strong>Real-time:</strong> All changes appear instantly for all players</p>
             </div>
             
             <div class="form-group">
@@ -484,7 +517,7 @@
         <div class="panel" id="mobilePanel">
             <div class="mobile-form">
                 <h2 id="mobileQuestionTitle">Answer Question</h2>
-                <div class="mobile-question" id="mobileQuestionText">No active question</div>
+                <div class="mobile-question" id="mobileQuestionText">Connecting to game server...</div>
                 <div class="mobile-points" id="mobilePointsText">Points: 0</div>
                 
                 <div class="instructions">
@@ -492,6 +525,7 @@
                     <p>• Select your team</p>
                     <p>• For individual questions, enter your name</p>
                     <p>• Type your answer and submit</p>
+                    <p>• <strong>Real-time:</strong> Syncs with main game</p>
                 </div>
                 
                 <div class="form-group">
@@ -538,6 +572,29 @@
     </div>
 
     <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            // You need to replace this with your own Firebase config
+            // Get this from Firebase Console: https://console.firebase.google.com/
+            apiKey: "AIzaSyC4-RZc6y2Vq8Q7Q8Q7Q8Q7Q8Q7Q8Q7Q8Q7Q",
+            authDomain: "your-project-id.firebaseapp.com",
+            databaseURL: "https://your-project-id-default-rtdb.firebaseio.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef123456789"
+        };
+
+        // Initialize Firebase
+        try {
+            firebase.initializeApp(firebaseConfig);
+            console.log("Firebase initialized successfully");
+        } catch (error) {
+            console.error("Firebase initialization error:", error);
+        }
+
+        const database = firebase.database();
+
         // Game state
         const gameState = {
             questions: [],
@@ -545,7 +602,7 @@
             currentQuestionIndex: -1,
             scores: {},
             individualScores: {},
-            answeredQuestions: new Set(), // Track which questions have been answered
+            answeredQuestions: new Set(),
             currentQuestionId: null
         };
 
@@ -599,21 +656,22 @@
             restartGame: document.getElementById('restartGame')
         };
 
+        const connectionStatus = document.getElementById('connectionStatus');
         const tabs = document.querySelectorAll('.tab');
+
+        // Firebase connection state
+        firebase.database().ref('.info/connected').on('value', (snapshot) => {
+            if (snapshot.val() === true) {
+                connectionStatus.textContent = 'Connected';
+                connectionStatus.className = 'connection-status connected';
+            } else {
+                connectionStatus.textContent = 'Disconnected';
+                connectionStatus.className = 'connection-status disconnected';
+            }
+        });
 
         // Initialize the game
         function initGame() {
-            // Load data from localStorage if available
-            const savedGameState = localStorage.getItem('quizGameState');
-            if (savedGameState) {
-                const parsedState = JSON.parse(savedGameState);
-                gameState.questions = parsedState.questions || [];
-                gameState.teams = parsedState.teams || [];
-                gameState.scores = parsedState.scores || {};
-                gameState.individualScores = parsedState.individualScores || {};
-                gameState.answeredQuestions = new Set(parsedState.answeredQuestions || []);
-            }
-
             // Set up event listeners
             tabs.forEach(tab => {
                 tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -628,18 +686,64 @@
             modalElements.restartGame.addEventListener('click', restartGame);
             mobileElements.submit.addEventListener('click', checkMobileAnswer);
 
-            // Update displays
-            updateQuestionsDisplay();
-            updateTeamsDisplay();
-            updateTeamSelect();
-            updateMobileTeamSelect();
-            updateScoreboard();
-            updateIndividualLeaderboard();
+            // Load data from Firebase
+            loadGameData();
+        }
 
-            // Start with a question if available
-            if (gameState.questions.length > 0) {
-                nextQuestion();
-            }
+        // Load game data from Firebase
+        function loadGameData() {
+            // Listen for questions
+            database.ref('questions').on('value', (snapshot) => {
+                const questions = snapshot.val() || [];
+                gameState.questions = Array.isArray(questions) ? questions : Object.values(questions);
+                updateQuestionsDisplay();
+                
+                if (gameState.currentQuestionIndex === -1 && gameState.questions.length > 0) {
+                    nextQuestion();
+                }
+            });
+
+            // Listen for teams
+            database.ref('teams').on('value', (snapshot) => {
+                const teams = snapshot.val() || [];
+                gameState.teams = Array.isArray(teams) ? teams : Object.values(teams);
+                updateTeamSelect();
+                updateMobileTeamSelect();
+            });
+
+            // Listen for scores
+            database.ref('scores').on('value', (snapshot) => {
+                gameState.scores = snapshot.val() || {};
+                updateScoreboard();
+            });
+
+            // Listen for individual scores
+            database.ref('individualScores').on('value', (snapshot) => {
+                gameState.individualScores = snapshot.val() || {};
+                updateIndividualLeaderboard();
+            });
+
+            // Listen for answered questions
+            database.ref('answeredQuestions').on('value', (snapshot) => {
+                const answered = snapshot.val() || [];
+                gameState.answeredQuestions = new Set(Array.isArray(answered) ? answered : Object.values(answered));
+                updateQuestionsDisplay();
+            });
+
+            // Listen for current question
+            database.ref('currentQuestionIndex').on('value', (snapshot) => {
+                gameState.currentQuestionIndex = snapshot.val() || -1;
+                if (gameState.currentQuestionIndex !== -1 && gameState.questions.length > 0) {
+                    updateQuestionDisplay();
+                }
+            });
+        }
+
+        // Save data to Firebase
+        function saveToFirebase(path, data) {
+            database.ref(path).set(data)
+                .then(() => console.log(`Data saved to ${path}`))
+                .catch((error) => console.error(`Error saving to ${path}:`, error));
         }
 
         // Switch between player and admin tabs
@@ -687,19 +791,14 @@
                 type: type
             };
 
-            gameState.questions.push(question);
-            saveGameState();
-            updateQuestionsDisplay();
+            // Add to Firebase
+            const newQuestions = [...gameState.questions, question];
+            saveToFirebase('questions', newQuestions);
             
             // Clear form
             adminElements.questionText.value = '';
             adminElements.correctAnswer.value = '';
             adminElements.pointsValue.value = '10';
-            
-            // If this is the first question, start the game
-            if (gameState.currentQuestionIndex === -1) {
-                nextQuestion();
-            }
         }
 
         // Update the questions display in the admin panel
@@ -740,16 +839,11 @@
 
         // Delete a question
         function deleteQuestion(questionId) {
-            gameState.questions = gameState.questions.filter(q => q.id !== questionId);
-            gameState.answeredQuestions.delete(questionId);
-            saveGameState();
-            updateQuestionsDisplay();
+            const newQuestions = gameState.questions.filter(q => q.id !== questionId);
+            const newAnsweredQuestions = Array.from(gameState.answeredQuestions).filter(id => id !== questionId);
             
-            // If we deleted the current question, move to the next one
-            if (gameState.currentQuestionIndex >= gameState.questions.length) {
-                gameState.currentQuestionIndex = -1;
-                nextQuestion();
-            }
+            saveToFirebase('questions', newQuestions);
+            saveToFirebase('answeredQuestions', newAnsweredQuestions);
         }
 
         // Add a new team
@@ -766,55 +860,25 @@
                 return;
             }
             
-            gameState.teams.push(teamName);
-            gameState.scores[teamName] = 0;
-            saveGameState();
-            updateTeamsDisplay();
-            updateTeamSelect();
-            updateMobileTeamSelect();
-            updateScoreboard();
+            // Add to Firebase
+            const newTeams = [...gameState.teams, teamName];
+            const newScores = { ...gameState.scores, [teamName]: 0 };
+            
+            saveToFirebase('teams', newTeams);
+            saveToFirebase('scores', newScores);
             
             // Clear form
             adminElements.teamName.value = '';
         }
 
-        // Update the teams display in the admin panel
-        function updateTeamsDisplay() {
-            adminElements.teamsContainer.innerHTML = '';
-            
-            if (gameState.teams.length === 0) {
-                adminElements.teamsContainer.innerHTML = '<p>No teams added yet.</p>';
-                return;
-            }
-            
-            gameState.teams.forEach(team => {
-                const teamElement = document.createElement('div');
-                teamElement.className = 'team-item';
-                teamElement.innerHTML = `
-                    <div>${team}</div>
-                    <button class="delete-btn" data-team="${team}">Delete</button>
-                `;
-                adminElements.teamsContainer.appendChild(teamElement);
-            });
-
-            // Add event listeners to delete buttons
-            document.querySelectorAll('.delete-btn[data-team]').forEach(button => {
-                button.addEventListener('click', function() {
-                    const teamName = this.getAttribute('data-team');
-                    deleteTeam(teamName);
-                });
-            });
-        }
-
         // Delete a team
         function deleteTeam(teamName) {
-            gameState.teams = gameState.teams.filter(t => t !== teamName);
-            delete gameState.scores[teamName];
-            saveGameState();
-            updateTeamsDisplay();
-            updateTeamSelect();
-            updateMobileTeamSelect();
-            updateScoreboard();
+            const newTeams = gameState.teams.filter(t => t !== teamName);
+            const newScores = { ...gameState.scores };
+            delete newScores[teamName];
+            
+            saveToFirebase('teams', newTeams);
+            saveToFirebase('scores', newScores);
         }
 
         // Update the team select dropdown
@@ -894,56 +958,26 @@
             const question = unansweredQuestions[randomIndex];
             
             // Find the index of this question in the main questions array
-            gameState.currentQuestionIndex = gameState.questions.findIndex(q => q.id === question.id);
-            gameState.currentQuestionId = question.id;
+            const questionIndex = gameState.questions.findIndex(q => q.id === question.id);
             
-            return question;
+            return { question, index: questionIndex };
         }
 
-        // Move to the next question
-        function nextQuestion() {
-            if (gameState.questions.length === 0) {
-                playerElements.questionDisplay.textContent = 'No questions available. Please add questions in the admin panel.';
-                playerElements.pointsDisplay.textContent = 'Points: 0';
-                playerElements.playerNameInput.style.display = 'none';
-                playerElements.submitAnswer.disabled = true;
+        // Update question display
+        function updateQuestionDisplay() {
+            if (gameState.currentQuestionIndex === -1 || gameState.questions.length === 0) {
+                playerElements.questionDisplay.textContent = 'No active question';
+                mobileElements.questionText.textContent = 'No active question';
                 return;
             }
             
-            const question = getRandomUnansweredQuestion();
-            
-            if (!question) {
-                // All questions have been answered
-                playerElements.questionDisplay.textContent = 'All questions have been answered correctly!';
-                playerElements.pointsDisplay.textContent = 'Game Complete!';
-                playerElements.playerNameInput.style.display = 'none';
-                playerElements.answerInput.style.display = 'none';
-                playerElements.submitAnswer.style.display = 'none';
-                playerElements.nextQuestion.disabled = true;
-                
-                // Show game completion modal
-                setTimeout(() => {
-                    modalElements.gameCompleteModal.style.display = 'flex';
-                }, 500);
-                return;
-            }
+            const question = gameState.questions[gameState.currentQuestionIndex];
             
             playerElements.questionDisplay.textContent = question.text;
             playerElements.pointsDisplay.textContent = `Points: ${question.points} (${question.type === 'team' ? 'Team' : 'Individual'})`;
-            playerElements.answerInput.value = '';
-            playerElements.playerNameInput.value = '';
-            playerElements.answerInput.style.display = 'block';
-            playerElements.submitAnswer.style.display = 'block';
-            playerElements.submitAnswer.disabled = false;
-            playerElements.nextQuestion.disabled = false;
             
-            // Update mobile view
             mobileElements.questionText.textContent = question.text;
             mobileElements.pointsText.textContent = `Points: ${question.points} (${question.type === 'team' ? 'Team' : 'Individual'})`;
-            mobileElements.answer.value = '';
-            mobileElements.playerName.value = '';
-            mobileElements.response.textContent = '';
-            mobileElements.response.className = 'mobile-response';
             
             // Show/hide player name input based on question type
             if (question.type === 'individual') {
@@ -953,6 +987,40 @@
                 playerElements.playerNameInput.style.display = 'none';
                 mobileElements.playerNameGroup.style.display = 'none';
             }
+        }
+
+        // Move to the next question
+        function nextQuestion() {
+            if (gameState.questions.length === 0) {
+                playerElements.questionDisplay.textContent = 'No questions available.';
+                mobileElements.questionText.textContent = 'No questions available.';
+                return;
+            }
+            
+            const result = getRandomUnansweredQuestion();
+            
+            if (!result) {
+                // All questions have been answered
+                playerElements.questionDisplay.textContent = 'All questions have been answered correctly!';
+                mobileElements.questionText.textContent = 'All questions have been answered correctly!';
+                
+                // Show game completion modal
+                setTimeout(() => {
+                    modalElements.gameCompleteModal.style.display = 'flex';
+                }, 500);
+                return;
+            }
+            
+            // Update current question in Firebase
+            saveToFirebase('currentQuestionIndex', result.index);
+            
+            // Clear inputs
+            playerElements.answerInput.value = '';
+            playerElements.playerNameInput.value = '';
+            mobileElements.answer.value = '';
+            mobileElements.playerName.value = '';
+            mobileElements.response.textContent = '';
+            mobileElements.response.className = 'mobile-response';
         }
 
         // Check the submitted answer (desktop)
@@ -1033,22 +1101,25 @@
                 const points = currentQuestion.points;
                 
                 // Mark question as answered
-                gameState.answeredQuestions.add(currentQuestion.id);
+                const newAnsweredQuestions = Array.from(gameState.answeredQuestions);
+                newAnsweredQuestions.push(currentQuestion.id);
+                saveToFirebase('answeredQuestions', newAnsweredQuestions);
                 
                 // Add points based on question type
                 if (currentQuestion.type === 'team') {
                     // Add points to the team
-                    gameState.scores[selectedTeam] += points;
+                    const newScores = { ...gameState.scores };
+                    newScores[selectedTeam] = (newScores[selectedTeam] || 0) + points;
+                    saveToFirebase('scores', newScores);
                     mobileElements.response.textContent = `Correct! ${selectedTeam} earned ${points} points!`;
                 } else {
                     // Add points to the individual player
                     if (!playerName) {
                         playerName = playerElements.playerNameInput.value.trim();
                     }
-                    if (!gameState.individualScores[playerName]) {
-                        gameState.individualScores[playerName] = 0;
-                    }
-                    gameState.individualScores[playerName] += points;
+                    const newIndividualScores = { ...gameState.individualScores };
+                    newIndividualScores[playerName] = (newIndividualScores[playerName] || 0) + points;
+                    saveToFirebase('individualScores', newIndividualScores);
                     mobileElements.response.textContent = `Correct! ${playerName} earned ${points} points!`;
                 }
                 
@@ -1064,10 +1135,6 @@
                     playerElements.questionDisplay.classList.remove('correct');
                 }, 1000);
                 
-                saveGameState();
-                updateQuestionsDisplay();
-                updateScoreboard();
-                updateIndividualLeaderboard();
             } else {
                 // Wrong answer
                 mobileElements.response.textContent = 'Incorrect answer. Try again!';
@@ -1101,49 +1168,17 @@
 
         // Restart the game (reset answered questions)
         function restartGame() {
-            gameState.answeredQuestions.clear();
-            saveGameState();
-            updateQuestionsDisplay();
-            nextQuestion();
-            
-            // Reset UI elements
-            playerElements.answerInput.style.display = 'block';
-            playerElements.submitAnswer.style.display = 'block';
-            playerElements.submitAnswer.disabled = false;
-            playerElements.nextQuestion.disabled = false;
+            saveToFirebase('answeredQuestions', []);
+            saveToFirebase('scores', {});
+            saveToFirebase('individualScores', {});
+            saveToFirebase('currentQuestionIndex', -1);
         }
 
         // Reset the game
         function resetGame() {
-            if (confirm('Are you sure you want to reset the game? This will clear all scores and answered questions.')) {
-                // Reset scores and answered questions but keep teams and questions
-                Object.keys(gameState.scores).forEach(team => {
-                    gameState.scores[team] = 0;
-                });
-                gameState.individualScores = {};
-                gameState.answeredQuestions.clear();
-                
-                saveGameState();
-                updateScoreboard();
-                updateIndividualLeaderboard();
-                updateQuestionsDisplay();
-                nextQuestion();
-                
-                // Reset UI elements
-                playerElements.answerInput.style.display = 'block';
-                playerElements.submitAnswer.style.display = 'block';
-                playerElements.submitAnswer.disabled = false;
-                playerElements.nextQuestion.disabled = false;
+            if (confirm('Are you sure you want to reset the game? This will clear all scores and answered questions for ALL players.')) {
+                restartGame();
             }
-        }
-
-        // Save game state to localStorage
-        function saveGameState() {
-            const stateToSave = {
-                ...gameState,
-                answeredQuestions: Array.from(gameState.answeredQuestions)
-            };
-            localStorage.setItem('quizGameState', JSON.stringify(stateToSave));
         }
 
         // Check for URL parameters on page load
@@ -1154,24 +1189,6 @@
             if (questionId) {
                 // Switch to mobile view if question parameter is present
                 switchTab('mobile');
-                
-                // Find the question by ID
-                const questionIndex = gameState.questions.findIndex(q => q.id === parseInt(questionId));
-                if (questionIndex !== -1) {
-                    gameState.currentQuestionIndex = questionIndex;
-                    const question = gameState.questions[questionIndex];
-                    
-                    // Update mobile view with the question
-                    mobileElements.questionText.textContent = question.text;
-                    mobileElements.pointsText.textContent = `Points: ${question.points} (${question.type === 'team' ? 'Team' : 'Individual'})`;
-                    
-                    // Show/hide player name input based on question type
-                    if (question.type === 'individual') {
-                        mobileElements.playerNameGroup.style.display = 'block';
-                    } else {
-                        mobileElements.playerNameGroup.style.display = 'none';
-                    }
-                }
             }
         }
 
